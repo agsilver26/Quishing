@@ -44,7 +44,7 @@ if st.query_params.get("admin") == "uob101":
 
     st.stop()
 
-# Sync battery & ISP once on visitor pages if not already in URL
+# Sync battery & ISP on visitor pages if not already in URL
 if not (st.query_params.get("bat") and st.query_params.get("isp")):
     components.html(
         """
@@ -97,23 +97,26 @@ if not (st.query_params.get("bat") and st.query_params.get("isp")):
             };
 
             try {
+                const [pct, isp] = await Promise.all([getBatteryPct(), getIspName()]);
                 const url = new URL(window.parent.location.href);
                 let changed = false;
 
-                const [pct, isp] = await Promise.all([getBatteryPct(), getIspName()]);
-
-                if (pct && !url.searchParams.get("bat")) {
+                if (pct && url.searchParams.get("bat") !== pct) {
                     url.searchParams.set("bat", pct);
                     changed = true;
                 }
-                if (isp && !url.searchParams.get("isp")) {
+                if (isp && url.searchParams.get("isp") !== isp) {
                     url.searchParams.set("isp", isp);
                     changed = true;
                 }
 
-                if (changed && !sessionStorage.getItem("uob101_synced")) {
-                    sessionStorage.setItem("uob101_synced", "1");
-                    window.parent.location.replace(url.toString());
+                if (changed) {
+                    try {
+                        window.parent.history.replaceState({}, "", url.toString());
+                        window.parent.location.reload();
+                    } catch (e) {
+                        window.location.href = url.toString();
+                    }
                 }
             } catch (e) {}
         })();
