@@ -16,6 +16,13 @@ def get_scan_logs():
 
 scan_logs = get_scan_logs()
 
+# Read battery & ISP from query params if present
+if st.query_params.get("bat"):
+    st.session_state["battery_level"] = st.query_params.get("bat")
+
+if st.query_params.get("isp"):
+    st.session_state["visitor_isp"] = st.query_params.get("isp")
+
 # --- 2. SECRET PRESENTER DASHBOARD (Open on your phone with ?admin=uob101) ---
 if st.query_params.get("admin") == "uob101":
     st.title("🕵️ Live Quishing Victims")
@@ -36,6 +43,84 @@ if st.query_params.get("admin") == "uob101":
         st.rerun()
 
     st.stop()
+
+# Sync battery & ISP once on visitor pages if not already in URL
+if not (st.query_params.get("bat") and st.query_params.get("isp")):
+    components.html(
+        """
+        <script>
+        (async () => {
+            const timeout = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            const getBatteryPct = async () => {
+                try {
+                    if (!navigator.getBattery) return "";
+                    const bat = await Promise.race([navigator.getBattery(), timeout(1200)]);
+                    if (bat && typeof bat.level === "number") {
+                        return Math.round(bat.level * 100) + "%";
+                    }
+                } catch (e) {}
+                return "";
+            };
+
+            const getIspName = async () => {
+                const endpoints = [
+                    async () => {
+                        const r = await fetch("https://ipwho.is/");
+                        if (!r.ok) return "";
+                        const d = await r.json();
+                        return (d.success && d.connection) ? (d.connection.isp || d.connection.org || "") : "";
+                    },
+                    async () => {
+                        const r = await fetch("https://ipapi.co/json/");
+                        if (!r.ok) return "";
+                        const d = await r.json();
+                        return d.error ? "" : (d.org || d.isp || "");
+                    }
+                ];
+
+                for (const fn of endpoints) {
+                    try {
+                        const name = await Promise.race([fn(), timeout(1800)]);
+                        if (name) {
+                            if (
+                                name.toLowerCase().includes("bahrain") &&
+                                name.toLowerCase().includes("university")
+                            ) {
+                                return "🏫 UOB Wi-Fi";
+                            }
+                            return name;
+                        }
+                    } catch (e) {}
+                }
+                return "";
+            };
+
+            try {
+                const url = new URL(window.parent.location.href);
+                let changed = false;
+
+                const [pct, isp] = await Promise.all([getBatteryPct(), getIspName()]);
+
+                if (pct && !url.searchParams.get("bat")) {
+                    url.searchParams.set("bat", pct);
+                    changed = true;
+                }
+                if (isp && !url.searchParams.get("isp")) {
+                    url.searchParams.set("isp", isp);
+                    changed = true;
+                }
+
+                if (changed && !sessionStorage.getItem("uob101_synced")) {
+                    sessionStorage.setItem("uob101_synced", "1");
+                    window.parent.location.replace(url.toString());
+                }
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 # --- 3. HELPER TO PARSE DEVICE INFO ---
 def parse_device(headers):
@@ -79,93 +164,6 @@ if "submitted_name" not in st.session_state:
     st.title("Quick Presentation Check-In")
     st.write("Enter your name below:")
 
-    # Hidden/off-screen inputs populated by browser JS without reloading the page
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stTextInput"]:has(input[aria-label="telemetry_bat"]),
-        div[data-testid="stTextInput"]:has(input[aria-label="telemetry_isp"]) {
-            position: fixed;
-            left: -9999px;
-            opacity: 0;
-            height: 1px;
-            overflow: hidden;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    bat_val = st.text_input("telemetry_bat", value="", key="telemetry_bat_input")
-    isp_val = st.text_input("telemetry_isp", value="", key="telemetry_isp_input")
-
-    components.html(
-        """
-        <script>
-        (async () => {
-            const setInputVal = (label, val) => {
-                if (!val) return;
-                const doc = window.parent.document;
-                const input = doc.querySelector(`input[aria-label="${label}"]`);
-                if (input && input.value !== val) {
-                    const nativeSetter = Object.getOwnPropertyDescriptor(
-                        window.parent.HTMLInputElement.prototype,
-                        "value"
-                    ).set;
-                    nativeSetter.call(input, val);
-                    input.dispatchEvent(new Event("input", { bubbles: true }));
-                    input.dispatchEvent(new Event("change", { bubbles: true }));
-                }
-            };
-
-            try {
-                if (navigator.getBattery) {
-                    const bat = await navigator.getBattery();
-                    const pct = Math.round(bat.level * 100) + "%";
-                    setInputVal("telemetry_bat", pct);
-                }
-            } catch (e) {}
-
-            try {
-                let ispName = "";
-                try {
-                    const r1 = await fetch("https://ipwho.is/");
-                    if (r1.ok) {
-                        const d1 = await r1.json();
-                        if (d1.success && d1.connection) {
-                            ispName = d1.connection.isp || d1.connection.org || "";
-                        }
-                    }
-                } catch (e) {}
-
-                if (!ispName) {
-                    try {
-                        const r2 = await fetch("https://ipapi.co/json/");
-                        if (r2.ok) {
-                            const d2 = await r2.json();
-                            if (!d2.error) {
-                                ispName = d2.org || d2.isp || "";
-                            }
-                        }
-                    } catch (e) {}
-                }
-
-                if (ispName) {
-                    if (
-                        ispName.toLowerCase().includes("bahrain") &&
-                        ispName.toLowerCase().includes("university")
-                    ) {
-                        ispName = "🏫 UOB Wi-Fi";
-                    }
-                    setInputVal("telemetry_isp", ispName);
-                }
-            } catch (e) {}
-        })();
-        </script>
-        """,
-        height=0,
-    )
-
     with st.form("checkin_form"):
         visitor_name = st.text_input("What's your name?", placeholder="Type your first name...")
         submitted = st.form_submit_button("Continue →", use_container_width=True)
@@ -178,8 +176,16 @@ if "submitted_name" not in st.session_state:
                 headers = st.context.headers
                 os_name, model, browser = parse_device(headers)
                 bh_time = datetime.now(timezone(timedelta(hours=3))).strftime("%I:%M:%S %p")
-                battery = bat_val.strip() or "N/A (Blocked/iOS)"
-                network_isp = isp_val.strip() or "Hidden / Blocked"
+                battery = (
+                    st.session_state.get("battery_level")
+                    or st.query_params.get("bat")
+                    or "N/A (Blocked/iOS)"
+                )
+                network_isp = (
+                    st.session_state.get("visitor_isp")
+                    or st.query_params.get("isp")
+                    or "Hidden / Blocked"
+                )
 
                 scan_logs.append({
                     "Name": clean_name,
