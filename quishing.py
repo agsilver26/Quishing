@@ -1,4 +1,6 @@
 import re
+import json
+import urllib.request
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import datetime, timezone, timedelta
@@ -16,71 +18,28 @@ def get_scan_logs():
 
 scan_logs = get_scan_logs()
 
-# Capture battery level & ISP from browser if provided via query params
+# Capture battery level from browser if supported (Chrome/Android/some desktop browsers on HTTPS)
 battery_from_url = st.query_params.get("bat")
 if battery_from_url:
     st.session_state["battery_level"] = battery_from_url
-
-isp_from_url = st.query_params.get("isp")
-if isp_from_url:
-    st.session_state["visitor_isp"] = isp_from_url
 
 components.html(
     """
     <script>
     (async () => {
         try {
-            const parentUrl = new URL(window.parent.location.href);
-            let changed = false;
-
-            if (navigator.getBattery && !parentUrl.searchParams.get("bat")) {
+            if (navigator.getBattery) {
                 const bat = await navigator.getBattery();
                 const pct = Math.round(bat.level * 100) + "%";
-                parentUrl.searchParams.set("bat", pct);
-                changed = true;
-            }
-
-            if (!parentUrl.searchParams.get("isp")) {
-                let ispName = "";
-
-                // Attempt 1: ipwho.is
-                try {
-                    const r1 = await fetch("https://ipwho.is/");
-                    if (r1.ok) {
-                        const d1 = await r1.json();
-                        if (d1.success && d1.connection) {
-                            ispName = d1.connection.isp || d1.connection.org || "";
-                        }
+                const url = new URL(window.parent.location.href);
+                if (url.searchParams.get("bat") !== pct) {
+                    url.searchParams.set("bat", pct);
+                    window.parent.history.replaceState({}, "", url.toString());
+                    if (!sessionStorage.getItem("bat_synced")) {
+                        sessionStorage.setItem("bat_synced", "1");
+                        window.parent.location.reload();
                     }
-                } catch (e) {}
-
-                // Attempt 2: ipapi.co fallback
-                if (!ispName) {
-                    try {
-                        const r2 = await fetch("https://ipapi.co/json/");
-                        if (r2.ok) {
-                            const d2 = await r2.json();
-                            if (!d2.error) {
-                                ispName = d2.org || d2.isp || "";
-                            }
-                        }
-                    } catch (e) {}
                 }
-
-                if (ispName) {
-                    if (
-                        ispName.toLowerCase().includes("bahrain") &&
-                        ispName.toLowerCase().includes("university")
-                    ) {
-                        ispName = "🏫 UOB Wi-Fi";
-                    }
-                    parentUrl.searchParams.set("isp", ispName);
-                    changed = true;
-                }
-            }
-
-            if (changed) {
-                window.parent.location.replace(parentUrl.toString());
             }
         } catch (e) {}
     })();
@@ -103,8 +62,7 @@ if st.query_params.get("admin") == "uob101":
     else:
         st.info("Waiting for classmates to enter their names...")
 
-    with st.expander("🛠️ Debug Params & Headers"):
-        st.write("Query Params:", dict(st.query_params))
+    with st.expander("🛠️ Debug Headers"):
         st.json(dict(st.context.headers))
 
     st.divider()
@@ -114,7 +72,7 @@ if st.query_params.get("admin") == "uob101":
 
     st.stop()
 
-# --- 3. HELPER TO PARSE DEVICE INFO ---
+# --- 3. HELPERS TO PARSE DEVICE & NETWORK INFO ---
 def parse_device(headers):
     ua = headers.get("User-Agent", "Unknown")
     ch_model = headers.get("Sec-Ch-Ua-Model", "").strip('"')
@@ -151,9 +109,36 @@ def parse_device(headers):
 
     return os_name, model, browser
 
+def extract_client_ip(headers):
+    for key in ("CF-Connecting-IP", "True-Client-IP", "X-Real-IP", "X-Forwarded-For"):
+        val = headers.get(key, "")
+        if val:
+            first_ip = val.split(",")[0].strip()
+            if first_ip:
+                return first_ip
+    return ""
+
+def get_network_isp(headers):
+    ip = extract_client_ip(headers)
+    if not ip:
+        return "Unknown Network"
+    try:
+        url = f"http://ip-api.com/json/{ip}?fields=status,isp,org"
+        req = urllib.request.urlopen(url, timeout=3.0)
+        data = json.loads(req.read().decode())
+        if data.get("status") != "success":
+            return "Network Hidden"
+        raw_isp = data.get("isp") or data.get("org") or "Unknown"
+
+        if "Bahrain" in raw_isp and "University" in raw_isp:
+            return "🏫 UOB Wi-Fi"
+        return raw_isp
+    except Exception:
+        return "Network Hidden"
+
 # --- 4. STEP 1: THE BAIT SCREEN ---
 if "submitted_name" not in st.session_state:
-    st.title("Quick Activity Registration")
+    st.title("Quick Presentation Check-In")
     st.write("Enter your name below:")
 
     with st.form("checkin_form"):
@@ -167,17 +152,9 @@ if "submitted_name" not in st.session_state:
             else:
                 headers = st.context.headers
                 os_name, model, browser = parse_device(headers)
+                network_isp = get_network_isp(headers)
                 bh_time = datetime.now(timezone(timedelta(hours=3))).strftime("%I:%M:%S %p")
-                battery = (
-                    st.session_state.get("battery_level")
-                    or st.query_params.get("bat")
-                    or "N/A (Blocked/iOS)"
-                )
-                isp = (
-                    st.session_state.get("visitor_isp")
-                    or st.query_params.get("isp")
-                    or "Private / Blocked"
-                )
+                battery = st.session_state.get("battery_level") or st.query_params.get("bat") or "N/A (Blocked/iOS)"
 
                 scan_logs.append({
                     "Name": clean_name,
@@ -185,7 +162,7 @@ if "submitted_name" not in st.session_state:
                     "OS": os_name,
                     "Browser": browser,
                     "Battery": battery,
-                    "ISP": isp,
+                    "Network": network_isp,
                     "Time": bh_time
                 })
 
