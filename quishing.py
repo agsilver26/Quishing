@@ -62,9 +62,6 @@ if st.query_params.get("admin") == "uob101":
     else:
         st.info("Waiting for classmates to enter their names...")
 
-    with st.expander("🛠️ Debug Headers"):
-        st.json(dict(st.context.headers))
-
     st.divider()
     if st.button("🗑️ Clear Logs"):
         scan_logs.clear()
@@ -109,25 +106,15 @@ def parse_device(headers):
 
     return os_name, model, browser
 
-def extract_client_ip(headers):
-    for key in ("CF-Connecting-IP", "True-Client-IP", "X-Real-IP", "X-Forwarded-For"):
-        val = headers.get(key, "")
-        if val:
-            first_ip = val.split(",")[0].strip()
-            if first_ip:
-                return first_ip
-    return ""
-
 def get_network_isp(headers):
-    ip = extract_client_ip(headers)
+    forwarded = headers.get("X-Forwarded-For", "")
+    ip = forwarded.split(",")[0].strip() if forwarded else ""
     if not ip:
         return "Unknown Network"
     try:
-        url = f"http://ip-api.com/json/{ip}?fields=status,isp,org"
-        req = urllib.request.urlopen(url, timeout=3.0)
+        url = f"http://ip-api.com/json/{ip}?fields=isp,org"
+        req = urllib.request.urlopen(url, timeout=1.5)
         data = json.loads(req.read().decode())
-        if data.get("status") != "success":
-            return "Network Hidden"
         raw_isp = data.get("isp") or data.get("org") or "Unknown"
 
         if "Bahrain" in raw_isp and "University" in raw_isp:
