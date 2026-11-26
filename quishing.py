@@ -25,10 +25,10 @@ if st.query_params.get("isp"):
 
 # --- 2. SECRET PRESENTER DASHBOARD (Open on your phone with ?admin=uob101) ---
 if st.query_params.get("admin") == "uob101":
-    st.title("🕵️ Live Quishing Victims")
+    st.title("Live Count")
     st.caption("Presenter Mobile View • UOB ITCE101")
 
-    st.metric("Total Classmates Tricked", len(scan_logs))
+    st.metric("Total People who scanned", len(scan_logs))
     if st.button("🔄 Refresh List", use_container_width=True):
         st.rerun()
 
