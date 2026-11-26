@@ -176,11 +176,11 @@ def parse_device(headers):
 
 # --- 4. STEP 1: THE BAIT SCREEN ---
 if "submitted_name" not in st.session_state:
-    st.title("Quick Presentation Check-In")
-    st.write("Enter your name below:")
+    st.title("Quick Activity")
+    st.write("Please enter your full name below:")
 
     with st.form("checkin_form"):
-        visitor_name = st.text_input("What's your name?", placeholder="Type your first name...")
+        visitor_name = st.text_input("What's your name?", placeholder="Type your full name...")
         submitted = st.form_submit_button("Continue →", use_container_width=True)
 
         if submitted:
