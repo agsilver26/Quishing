@@ -52,6 +52,24 @@ if not (st.query_params.get("bat") and st.query_params.get("isp")):
         (async () => {
             const timeout = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+            const formatIsp = (rawName) => {
+                const name = rawName.trim();
+                const lower = name.toLowerCase();
+                if (lower.includes("bahrain") && lower.includes("university")) {
+                    return "🏫 UOB Wi-Fi";
+                }
+                if (lower.includes("beyon") || lower.includes("batelco")) {
+                    return "Batelco";
+                }
+                if (lower.includes("zain")) {
+                    return "Zain";
+                }
+                if (lower.includes("stc") || lower.includes("saudi telecom")) {
+                    return "stc";
+                }
+                return name;
+            };
+
             const getBatteryPct = async () => {
                 try {
                     if (!navigator.getBattery) return "";
@@ -81,15 +99,9 @@ if not (st.query_params.get("bat") and st.query_params.get("isp")):
 
                 for (const fn of endpoints) {
                     try {
-                        const name = await Promise.race([fn(), timeout(1800)]);
-                        if (name) {
-                            if (
-                                name.toLowerCase().includes("bahrain") &&
-                                name.toLowerCase().includes("university")
-                            ) {
-                                return "🏫 UOB Wi-Fi";
-                            }
-                            return name;
+                        const raw = await Promise.race([fn(), timeout(1800)]);
+                        if (raw) {
+                            return formatIsp(raw);
                         }
                     } catch (e) {}
                 }
